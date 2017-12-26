@@ -1,0 +1,141 @@
+﻿class WPWorkflowHierarchyLimitTester extends RunBase
+{
+    Dialog                  dialog;
+    DialogField             dialogHrpLimitDocumentType, dialogWorkerRecId;
+
+    HrpLimitDocumentType    hrpLimitDocumentType;
+    HcmWorkerRecId          hcmWorkerRecId;
+
+    public static void main(Args _args)
+    {
+        WPWorkflowHierarchyLimitTester    wpWorkflowHierarchyLimitTester;
+        
+        wpWorkflowHierarchyLimitTester = WPWorkflowHierarchyLimitTester::construct();
+
+        if (wpWorkflowHierarchyLimitTester.prompt())
+            wpWorkflowHierarchyLimitTester.run();
+    }
+
+    public void run()
+    {
+        this.process(hrpLimitDocumentType, hcmWorkerRecId);
+    }
+
+    public void process(HrpLimitDocumentType _limitDocumentType, HcmWorkerRecId _workerRecId)
+    {        
+        WorkflowTypeName                    workflowTemplateName;        
+        WorkflowHierarchyLevel              level = 0;
+        WorkflowContext                     workflowContext;
+        SysWorkflowTable                    workflowTable;
+        WorkflowLimitHierarchyProvider      workflowLimitHierarchyProvider;
+        WorkflowHierarchyProviderNode       workflowHierarchyProviderNode;
+        HRPWorkerLimit                      workerLimit = new HRPWorkerLimit();
+        HcmWorker                           hcmWorker = HcmWorker::find(_workerRecId);
+        DirPersonUser                       dirPersonUser;
+        HcmPositionId                       hcmPositionId;
+        HcmPosition                         hcmPosition;
+        container                           spendingCon, approvalCon;
+        UserId                              userId;
+        str                                 nodeId = hcmWorker.PersonnelNumber; //Starting worker
+        TableId                             tableId;
+        RefRecId                            refRecId;
+
+        TrvExpTrans trvExpTrans;
+
+        switch (_limitDocumentType)
+        {
+            case HrpLimitDocumentType::ExpenseReport:
+                
+                select firstOnly trvExpTrans;
+
+                workflowTemplateName    = workflowTypeStr(TrvLineItemTemplate);                
+                tableId                 = tableNum(TrvExpTrans);                                
+                refRecId                = trvExpTrans.RecId;
+                break;
+            default:
+                throw error("Currently developed for Expenses only");
+        }
+
+        select firstOnly workflowTable where workflowTable.TemplateName == workflowTemplateName;
+
+        workflowContext = WorkflowContext::newWorkflowContext(
+        curext(),
+        tableId,
+        refRecId,
+        workflowTable.WorkflowCorrelationId);
+
+        workflowLimitHierarchyProvider = new WorkflowLimitHierarchyProvider();
+        
+
+        //Level 1
+        while (nodeId && level < 20) //20 is just a fall back. In case it goes into an endless loop.
+        {
+            workflowHierarchyProviderNode   = workflowLimitHierarchyProvider.getNextNode(nodeId, level, workflowContext);
+            nodeId                          = workflowHierarchyProviderNode.getnodeId();
+            hcmWorker                       = HcmWorker::findByPersonnelNumber(nodeId);
+            userId                          = DirPersonUser::findParty(hcmWorker.Person).User;
+            hcmPositionId                   = hcmWorker.primaryPositionId();
+            hcmPosition                     = HcmPosition::findByPosition(hcmPositionId);
+        
+            spendingCon = workerLimit.getWorkerSigningLimit(
+            hcmWorker.RecId,
+            SourceDocumentRelationType::ExpenseReport,
+            HRPLimitType::Spending,
+            hcmPosition.PositionId);
+        
+            approvalCon = workerLimit.getWorkerSigningLimit(
+            hcmWorker.RecId,
+            SourceDocumentRelationType::ExpenseReport,
+            HRPLimitType::Approval,
+            hcmPosition.PositionId);
+        
+            info(strFmt("UserId: %1 | WorkerId: %2 | PositionId: %3 | ReportsToPosition: %4 | SpendingLimit: %5 | ApprovalLimit: %6",
+            userId,
+            hcmWorker.PersonnelNumber,
+            hcmPosition.PositionId,
+            hcmPosition.reportsToPosition(),
+            con2Str(spendingCon),
+            con2Str(approvalCon)
+            ));
+        
+            level++;
+        }
+    }
+
+    public Object dialog()
+    {
+        DialogRunbase  dialogRunbase = super();
+
+        dialogHrpLimitDocumentType = dialogRunbase.addFieldValue(enumStr(HrpLimitDocumentType),hrpLimitDocumentType);
+        dialogWorkerRecId = dialogRunbase.addFieldValue(extendedTypeStr(HcmWorkerRecId),hcmWorkerRecId);
+
+        return dialogRunbase;
+    }
+
+    public boolean getFromDialog()
+    {
+        hrpLimitDocumentType    = dialogHrpLimitDocumentType.value();
+        hcmWorkerRecId          = dialogWorkerRecId.value();
+
+        return super();
+    }
+
+    public boolean validate(Object _calledFrom = null)
+    {
+        //if (false)
+        //    return checkFailed("");
+
+        return true;
+    }
+
+    static ClassDescription description()
+    {
+        return "Workflow hierarchy tester";
+    }
+
+    static WPWorkflowHierarchyLimitTester construct()
+    {
+        return new WPWorkflowHierarchyLimitTester();
+    }
+
+}
