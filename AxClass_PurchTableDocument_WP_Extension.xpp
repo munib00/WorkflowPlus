@@ -1,0 +1,63 @@
+﻿[ExtensionOf(classStr(PurchTableDocument)),
+ExpressionCurrencyFieldMapAttribute('parmSpendingLimit', 'parmCurrencyCode')]
+final class PurchTableDocument_WP_Extension
+{
+    public PurchReqSpendingLimitValueMST parmSpendingLimit(CompanyId _companyId,
+                                                           TableId   _tableId,
+                                                           RecId     _recId)
+    {
+        PurchTable    purchTable = PurchTable::findRecId(_recId);
+        RefRecId      workerRecId = purchTable.Requester ? purchTable.Requester : purchTable.WorkerPurchPlacer;
+        PurchReqSpendingLimitValueMST   ret;
+
+        if (workerRecId)
+        {
+            ret = PurchTableDocument::spendingLimitStatic(workerRecId, purchTable.CurrencyCode);
+        }
+
+        return ret;
+    }
+
+    public static PurchReqSpendingLimitValueMST spendingLimitStatic(RefRecId _hcmWorkerRecId, CurrencyCode _currencyCode)
+    {
+        AmountMST                      limitValue;
+        HRPWorkerLimit                 workerLimit;
+        HcmWorker                      hcmWorker;
+        container                      limitAmount;
+        HcmPositionWorkerAssignment    positionWorkerAssignment;
+        HcmPosition                    position;
+
+        select RecId from hcmWorker where hcmWorker.RecId == _hcmWorkerRecId
+            join Position from positionWorkerAssignment
+                where positionWorkerAssignment.Worker == hcmWorker.RecId
+            join PositionId from position
+                where position.RecId == positionWorkerAssignment.Position;
+
+        workerLimit = new HRPWorkerLimit();
+        limitAmount = workerLimit.getWorkerSigningLimit(hcmWorker.RecId, SourceDocumentRelationType::PurchaseOrder, HRPLimitType::Spending,position.PositionId);
+        limitValue = max(limitValue,CurrencyExchangeHelper::curAmount2CurAmount(conPeek(limitAmount, 1), conPeek(limitAmount, 2), _currencyCode));
+
+        return limitValue;
+    }
+
+    public CurrencyCode parmCurrencyCode(CompanyId _companyId,
+                                         TableId   _tableId,
+                                         RecId     _recId)
+    {
+        
+        PurchTable    purchTable = PurchTable::findRecId(_recId);
+        CurrencyCode  ret;
+
+        if (purchTable.CurrencyCode)
+        {
+            ret = purchTable.CurrencyCode;
+        }
+        else
+        {
+            ret = SystemParameters::find().SystemCurrencyCode;
+        }
+
+        return ret;
+    }
+
+}
